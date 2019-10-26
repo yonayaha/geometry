@@ -7,8 +7,8 @@ import networkx as nx
 
 
 class ObstacleMetric:
-    def __init__(self, circum, obstacles):
-        self.circum = circum
+    def __init__(self, surface, obstacles):
+        self.surface = surface
         self.obstacles = RtreeSet(obstacles)
         self.points = [point for polygon in self.polygons() for point in polygon.points()]
         self.point_visibility_polygons = None
@@ -16,16 +16,16 @@ class ObstacleMetric:
         self.polygon_visibility_points = None
         self.visibility_graph = None
         self.diameter = self.calc_diameter()
-        self.bounding_box = Polygon.from_bounds(*circum.bounds).exterior
+        self.bounding_box = Polygon.from_bounds(*surface.bounds).exterior
 
     def polygons(self):
-        return chain([self.circum], self.obstacles)
+        return chain([self.surface], self.obstacles)
 
     def segments(self):
         return (segment for polygon in self.polygons() for segment in polygon.segments())
 
     def calc_diameter(self):
-        left, bottom, right, top = self.circum.bounds
+        left, bottom, right, top = self.surface.bounds
         return np.linalg.norm(np.array([right, top]) - np.array([left, bottom]))
 
     def build_point_visibility_polygons(self):
@@ -34,7 +34,7 @@ class ObstacleMetric:
             self.point_visibility_polygons[point] = self.calc_visibility_polygon(point)
 
     def calc_visibility_polygon(self, point, radius=None):
-        visibility_polygon = self.circum
+        visibility_polygon = self.surface
         if radius is not None:
             visibility_polygon = visibility_polygon.intersection(point.buffer(radius))
         for obstacle in self.obstacles:
@@ -90,7 +90,7 @@ class ObstacleMetric:
 
         self.visibility_polygons = RtreeSet()
         self.polygon_visibility_points = dict()
-        self.recursive_intersect(set(), self.circum, 0)
+        self.recursive_intersect(set(), self.surface, 0)
 
     def recursive_intersect(self, points, current_intersection, n):
         for i in range(n, len(self.points)):
@@ -121,15 +121,15 @@ class ObstacleMetric:
         # TODO: use visibility_polygons - foreach 2 points, check if the connecting segment is within visibility polygon
         self.visibility_graph = SpatialGraph()
 
-        for polygon in chain([self.circum], self.obstacles):
+        for polygon in chain([self.surface], self.obstacles):
             for point in polygon.points():
                 self.visibility_graph.add_node(point)
 
-        for polygon in chain([self.circum], self.obstacles):
+        for polygon in chain([self.surface], self.obstacles):
             for segment in polygon.segments():
                 self.visibility_graph.add_edge(*segment.points())
 
-        for polygon0, polygon1 in product(chain([self.circum], self.obstacles), repeat=2):
+        for polygon0, polygon1 in product(chain([self.surface], self.obstacles), repeat=2):
             for point0 in polygon0.points():
                 segments = polygon1.segments()
                 segments.append(segments[0])
@@ -142,7 +142,7 @@ class ObstacleMetric:
 
     def is_visible(self, point0, point1):
         segment = LineString((point0, point1))
-        if not self.circum.contains(segment):
+        if not self.surface.contains(segment):
             return False
         for polygon in self.obstacles.intersection(segment):
             if segment.intersection(polygon) not in {point0, point1, MultiPoint([point0, point1])}:

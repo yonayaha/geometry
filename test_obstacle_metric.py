@@ -14,7 +14,7 @@ class TestObstacleMetric:
     def obstacle_image_draw(self):
         image = Image.new("RGB", (600, 600))
         draw = ImageDraw.Draw(image)
-        self.obstacle_metric.circum.draw(draw, fill=(255, 255, 255, 255))
+        self.obstacle_metric.surface.draw(draw, fill=(255, 255, 255, 255))
         for obstacle in self.obstacle_metric.obstacles:
             obstacle.draw(draw, fill=(0, 0, 0, 255))
 
@@ -58,7 +58,7 @@ class TestObstacleMetric:
     def test_get_containing_polygon(self):
         while True:
             point = Point(500 * random.random(), 500 * random.random())
-            if self.obstacle_metric.circum.contains(point) and not any(map(
+            if self.obstacle_metric.surface.contains(point) and not any(map(
                     lambda obstacle: obstacle.contains(point), self.obstacle_metric.obstacles)):
                 polygon = self.obstacle_metric.get_containing_polygon(point)
 
@@ -103,14 +103,14 @@ class TestObstacleMetric:
             break
 
 
-circum = Polygon([[0,0], [0,500], [500,500], [500,0]])
+surface = Polygon([[0,0], [0,500], [500,500], [500,0]])
 obstacles = [
     # Polygon([[100,100],[100,400],[400,400],[400,100],[300,100],[300,300],[200,300],[200,100]])
     Polygon([[100,100],[100,400],[200,400],[200,100]]),
     Polygon([[300,100],[300,300],[400,300],[400,100]])
 ]
 
-om = ObstacleMetric(circum, obstacles)
+om = ObstacleMetric(surface, obstacles)
 tom = TestObstacleMetric(om)
 # tom.show_obstacle_plane()
 om.build_point_visibility_polygons()
