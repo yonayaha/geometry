@@ -38,7 +38,7 @@ class RtreeSet:
         del self.items[id(item)]
 
     def insert(self, item):
-        if item in self:
+        if id(item) in self.items:
             raise Exception()
         else:
             self.items[id(item)] = item
