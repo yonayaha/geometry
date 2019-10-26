@@ -9,53 +9,53 @@ class RtreeSet:
     It designed to work efficiently with shapely.geometry objects (Point, LineString, Polygon, ...).
     """
     def __init__(self, items=None):
-        self.objects = dict()
+        self.items = dict()
         self.index = index.Index(properties=index.Property())
         if items:
             for item in items:
                 self.insert(item)
 
     def __bool__(self):
-        return bool(self.objects)
+        return bool(self.items)
 
     def __contains__(self, item):
-        return id(item) in self.objects
+        return id(item) in self.items
 
     def __iter__(self):
-        return iter(self.objects.values())
+        return iter(self.items.values())
 
     def __len__(self):
-        return len(self.objects)
+        return len(self.items)
 
     def __reduce__(self):
-        return RtreeSet, (list(self.objects.values()),)
+        return RtreeSet, (list(self.items.values()),)
 
     def __str__(self):
         return str({str(item) for item in self})
 
     def delete(self, item):
         self.index.delete(id(item), item.bounds)
-        del self.objects[id(item)]
+        del self.items[id(item)]
 
     def insert(self, item):
         if item in self:
             raise Exception()
         else:
-            self.objects[id(item)] = item
+            self.items[id(item)] = item
             self.index.insert(id(item), item.bounds)
 
     def intersection(self, item, exclude_item=True):
         for idx in self.index.intersection(item.bounds):
-            other = self.objects[idx]
+            other = self.items[idx]
             if not (exclude_item and item is other) and item.intersects(other):
                 yield(other)
 
     def nearest(self, item, exclude_item=True):
-        if not exclude_item and id(item) in self.objects:
+        if not exclude_item and id(item) in self.items:
             return item
         for idx in self.index.nearest(item.bounds, 2):
-            if self.objects[idx] is not item:
-                nearest_item = self.objects[idx]
+            if self.items[idx] is not item:
+                nearest_item = self.items[idx]
                 break
         else:
             return
