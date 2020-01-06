@@ -1,27 +1,31 @@
-from itertools import chain, product, cycle
 import random
 from shapely_extension import *
-import PIL.Image as Image
-import PIL.ImageDraw as ImageDraw
+import pickle
+import time
 
 from obstacle_metric import ObstacleMetric
+from surface_image import SurfaceImage
 
 
 class TestObstacleMetric:
     def __init__(self, obstacle_metric):
         self.obstacle_metric = obstacle_metric
 
-    def obstacle_image_draw(self):
-        image = Image.new("RGB", (600, 600))
-        draw = ImageDraw.Draw(image)
-        self.obstacle_metric.surface.draw(draw, fill=(255, 255, 255, 255))
+    def obstacle_surface_image(self):
+        image = SurfaceImage(self.obstacle_metric.surface)
         for obstacle in self.obstacle_metric.obstacles:
-            obstacle.draw(draw, fill=(0, 0, 0, 255))
+            image.draw_polygon(obstacle, fill=(0, 0, 0, 255))
 
-        return image, draw
+        return image
+
+    def random_point(self):
+        bounds = self.obstacle_metric.surface.bounds
+        x = bounds[0] + random.random() * (bounds[2] - bounds[0])
+        y = bounds[1] + random.random() * (bounds[3] - bounds[1])
+        return Point(x, y)
 
     def show_obstacle_plane(self):
-        image, draw = self.obstacle_image_draw()
+        image = self.obstacle_surface_image()
         image.show()
 
     def show_visibility_polygons(self):
@@ -29,75 +33,75 @@ class TestObstacleMetric:
             return
         for point in self.obstacle_metric.points:
             visibility_polygon = self.obstacle_metric.point_visibility_polygons[point]
-            image, draw = self.obstacle_image_draw()
+            image = self.obstacle_surface_image()
 
-            visibility_polygon.draw(draw, fill=(255, 0, 0, 255))
+            image.draw_polygon(visibility_polygon, fill=(255, 0, 0, 255))
             # for interior in visibility_polygon.interiors:
             #     draw.polygon(tuple(zip(*interior.xy)), fill=(255,255,255,255))
 
-            point.draw(draw, radius=3, fill=(0,255,0,255))
-
+            image.draw_point(point, fill=(0, 255, 0, 255))
             image.show()
 
     def show_visibility_subdivision(self):
-        image, draw = self.obstacle_image_draw()
+        image = self.obstacle_surface_image()
         for i, polygon in enumerate(self.obstacle_metric.polygon_visibility_points):
             fill = tuple([*([random.randint(0, 256)] * 3), 255])
-            polygon.draw(draw, fill=fill)
+            image.draw_polygon(polygon, fill=fill)
         image.show()
 
     def show_visibility_graph(self):
-        image, draw = self.obstacle_image_draw()
+        image = self.obstacle_surface_image()
 
         for point in self.obstacle_metric.visibility_graph.nodes:
-            draw.point(tuple(zip(*point.xy)))
+            image.draw_point(point, fill=(150, 150, 150, 255))
         for point0, point1 in self.obstacle_metric.visibility_graph.edges:
-            draw.line(tuple(chain(zip(*point0.xy), zip(*point1.xy))), fill=(0,0,0,255))
+            image.draw_line(point0, point1, fill=(0, 0, 0, 255))
         image.show()
 
     def test_get_containing_polygon(self):
         while True:
-            point = Point(500 * random.random(), 500 * random.random())
+            point = self.random_point()
             if self.obstacle_metric.surface.contains(point) and not any(map(
                     lambda obstacle: obstacle.contains(point), self.obstacle_metric.obstacles)):
                 polygon = self.obstacle_metric.get_containing_polygon(point)
 
-                image, draw = self.obstacle_image_draw()
+                image = self.obstacle_surface_image()
 
-                polygon.draw(draw, fill=(255, 0, 0, 255))
-                point.draw(draw, radius=3, fill=(0, 255, 0, 255))
+                image.draw_polygon(polygon, fill=(255, 0, 0, 255))
+                image.draw_point(point, fill=(0, 255, 0, 255))
 
                 image.show()
                 break
 
     def test_get_visible_points(self):
         while True:
-            point = Point(500 * random.random(), 500 * random.random())
+            point = self.random_point()
             visible_points = self.obstacle_metric.get_visible_points(point)
             if visible_points:
-                image, draw = self.obstacle_image_draw()
+                image = self.obstacle_surface_image()
 
-                point.draw(draw, radius=3, fill=(0, 255, 0, 255))
+                image.draw_point(point, fill=(0, 255, 0, 255))
                 for visible_point in visible_points:
-                    visible_point.draw(draw, radius=3, fill=(255, 0, 0, 255))
+                    image.draw_point(visible_point, fill=(255, 0, 0, 255))
                 image.show()
                 break
 
     def test_get_shortest_path(self):
         while True:
-            point0 = Point(500 * random.random(), 500 * random.random())
-            point1 = Point(500 * random.random(), 500 * random.random())
+            point0 = self.random_point()
+            point1 = self.random_point()
+            t0 = time.time()
             shortest_path = self.obstacle_metric.get_shortest_path(point0, point1)
             if not shortest_path:
                 continue
+            print('total:', time.time() - t0)
+            image = self.obstacle_surface_image()
 
-            image, draw = self.obstacle_image_draw()
-
-            point0.draw(draw, radius=3, fill=(0, 255, 0, 255))
-            point1.draw(draw, radius=3, fill=(0, 255, 0, 255))
+            image.draw_point(point0, fill=(0, 255, 0, 255))
+            image.draw_point(point1, fill=(0, 255, 0, 255))
 
             for mid_point0, mid_point1 in zip(shortest_path[:-1], shortest_path[1:]):
-                draw.line(tuple(chain(zip(*mid_point0.xy), zip(*mid_point1.xy))), fill=(0,0,0,255))
+                image.draw_line(mid_point0, mid_point1, fill=(0, 0, 0, 255))
 
             image.show()
             break

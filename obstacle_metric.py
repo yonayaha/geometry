@@ -16,7 +16,7 @@ class ObstacleMetric:
         self.polygon_visibility_points = None
         self.visibility_graph = None
         self.diameter = self.calc_diameter()
-        self.bounding_box = Polygon.from_bounds(*surface.bounds).exterior
+        self.bounding_box = self.calc_bounding_box()
 
     def polygons(self):
         return chain([self.surface], self.obstacles)
@@ -28,7 +28,12 @@ class ObstacleMetric:
         left, bottom, right, top = self.surface.bounds
         return np.linalg.norm(np.array([right, top]) - np.array([left, bottom]))
 
+    def calc_bounding_box(self):
+         union = reduce(BaseGeometry.union, self.obstacles, self.surface)
+         return Polygon.from_bounds(*union.bounds).exterior
+
     def build_point_visibility_polygons(self):
+        print('building point visibility polygons')
         self.point_visibility_polygons = dict()
         for point in self.points:
             self.point_visibility_polygons[point] = self.calc_visibility_polygon(point)
@@ -85,39 +90,53 @@ class ObstacleMetric:
             return EmptyGeometry()
 
     def build_visibility_subdivision(self):
+        print('building visibility subdivision')
         if not self.point_visibility_polygons:
             self.build_point_visibility_polygons()
 
         self.visibility_polygons = RtreeSet()
         self.polygon_visibility_points = dict()
-        self.recursive_intersect(set(), self.surface, 0)
-
-    def recursive_intersect(self, points, current_intersection, n):
-        for i in range(n, len(self.points)):
-            point = self.points[i]
+        self.surface.visible_points = set()
+        subdivision = {self.surface: set()}
+        print(len(self.points))
+        for i, point in enumerate(self.points):
+            print(i, len(subdivision))
+            new_subdivision = dict()
             visible_polygon = self.point_visibility_polygons[point]
-            intersection = current_intersection.intersection(visible_polygon)
-            if intersection.is_multipart_geometry():
-                intersection = reduce(BaseGeometry.union, filter(lambda shape: type(shape) is Polygon, intersection), EmptyGeometry())
-            if type(intersection) in [Polygon, MultiPolygon]:
-                self.recursive_intersect(points | {point}, intersection, i + 1)
+            for polygon, points in subdivision.items():
+                try:
+                    intersection = polygon.intersection(visible_polygon)
+                    if type(intersection) is Polygon and intersection.area > 0.001:
+                        new_subdivision[intersection] = points | {point}
+                    elif intersection.is_multipart_geometry():
+                        for part in intersection:
+                            if type(part) is Polygon and part.area > 0.001:
+                                new_subdivision[part] = points | {point}
+                except Exception as ex:
+                    print(ex)
+                    print(polygon.area, visible_polygon.area)
 
-                difference = current_intersection.difference(intersection)
-                if difference.is_multipart_geometry():
-                    difference = reduce(BaseGeometry.union, filter(lambda shape: type(shape) is Polygon, difference), EmptyGeometry())
-                if type(difference) in [Polygon, MultiPolygon]:
-                    self.recursive_intersect(points, difference, i + 1)
+                try:
+                    difference = polygon.difference(visible_polygon)
+                    if type(difference) is Polygon and difference.area > 0.001:
+                        new_subdivision[difference] = points
+                    elif difference.is_multipart_geometry():
+                        for part in difference:
+                            if type(part) is Polygon and part.area > 0.001:
+                                new_subdivision[part] = points
+                except Exception as ex:
+                    print(ex)
+                    print(polygon.area, visible_polygon.area)
 
-                break
-        else:
+            subdivision = new_subdivision
+
+        for polygon, points in subdivision.items():
             if points:
-                polygons = [current_intersection] if type(current_intersection) is Polygon else current_intersection
-                for polygon in polygons:
-                    if type(polygon) is Polygon:
-                        self.polygon_visibility_points[polygon] = points
-                        self.visibility_polygons.insert(polygon)
+                self.polygon_visibility_points[polygon] = points
+                self.visibility_polygons.insert(polygon)
 
     def build_visibility_graph(self):
+        print('building visibility graph')
         # TODO: use visibility_polygons - foreach 2 points, check if the connecting segment is within visibility polygon
         self.visibility_graph = SpatialGraph()
 
@@ -210,3 +229,7 @@ class ObstacleMetric:
     def calc_obstacle_metric_distance_polygon(self, point):
         # TODO
         return
+
+# TODO: build function that given a point returns a function that calculates the distance.
+# TODO: first calculate distance to all nodes and then for each point find connected nodes and find the shortest path.
+
