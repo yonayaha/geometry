@@ -44,22 +44,14 @@ class RtreeSet:
             self.items[id(item)] = item
             self.index.insert(id(item), item.bounds)
 
-    def intersection(self, item, exclude_item=True):
+    def intersection(self, item):
         for idx in self.index.intersection(item.bounds):
             other = self.items[idx]
-            if not (exclude_item and item is other) and item.intersects(other):
+            if item.intersects(other):
                 yield(other)
 
-    def nearest(self, item, exclude_item=True):
-        if not exclude_item and id(item) in self.items:
-            return item
-        for idx in self.index.nearest(item.bounds, 2):
-            if self.items[idx] is not item:
-                nearest_item = self.items[idx]
-                break
-        else:
-            return
-        search_radius = item.distance(nearest_item) * 1.01
-        buffer = item.buffer(search_radius)
-        return min(filter(lambda other: other is not item, self.intersection(buffer)),
-                   key=lambda other: item.distance(other))
+    def nearest(self, item, n=1):
+        search_radius = max(self.items[idx].distance(item) for idx in self.index.nearest(item.bounds, n)) * 1.01
+        buffer = item.buffer(search_radius)  # TODO: can do better
+        item_list = sorted(self.intersection(buffer), key=lambda other: item.distance(other))
+        return item_list[:n]

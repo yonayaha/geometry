@@ -36,13 +36,13 @@ class SpatialGraph(nx.Graph):
 
     def add_edges_from(self, edges, **attr):
         for edge in edges:
-            self.add_edge(edge, **attr)
+            self.add_edge(*edge, **attr)
 
     def remove_node(self, point):
         if point not in self.points:
             raise KeyError()
         self.points.delete(point)
-        for point0 in self.neighbors(point):
+        for point0 in list(self.neighbors(point)):
             self.remove_edge(point, point0)
         super().remove_node(point)
 
