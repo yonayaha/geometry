@@ -28,20 +28,6 @@ class TestObstacleMetric:
         image = self.obstacle_surface_image()
         image.show()
 
-    def show_visibility_polygons(self):
-        if not self.obstacle_metric.point_visibility_polygons:
-            return
-        for point in self.obstacle_metric.points:
-            visibility_polygon = self.obstacle_metric.point_visibility_polygons[point]
-            image = self.obstacle_surface_image()
-
-            image.draw_polygon(visibility_polygon, fill=(255, 0, 0, 255))
-            # for interior in visibility_polygon.interiors:
-            #     draw.polygon(tuple(zip(*interior.xy)), fill=(255,255,255,255))
-
-            image.draw_point(point, fill=(0, 255, 0, 255))
-            image.show()
-
     def show_visibility_subdivision(self):
         image = self.obstacle_surface_image()
         for i, polygon in enumerate(self.obstacle_metric.polygon_visibility_points):
@@ -106,6 +92,47 @@ class TestObstacleMetric:
             image.show()
             break
 
+    def test_get_point_distance_machine(self):
+        while True:
+            point = self.random_point()
+            t0 = time.time()
+            point_distance_machine = self.obstacle_metric.get_point_distance_machine(point, cutoff=None)
+            t1 = time.time() - t0
+            if not point_distance_machine:
+                continue
+            while True:
+                point1 = self.random_point()
+                t0 = time.time()
+                distance = point_distance_machine(point1)
+                if distance:
+                    print(t1, time.time() - t0, distance)
+                    break
+            break
+
+    def test_get_point_path_machine(self):
+        while True:
+            point = self.random_point()
+            t0 = time.time()
+            point_path_machine = self.obstacle_metric.get_point_path_machine(point, cutoff=None)
+            t1 = time.time() - t0
+            if not point_path_machine:
+                continue
+            while True:
+                point1 = self.random_point()
+                t0 = time.time()
+                shortest_path = point_path_machine(point1)
+                if shortest_path:
+                    shortest_path.append(point1)
+                    print(t1, time.time() - t0)
+                    image = self.obstacle_surface_image()
+
+                    image.draw_point(point, fill=(0, 255, 0, 255))
+                    image.draw_point(point1, fill=(0, 255, 0, 255))
+
+                    for mid_point0, mid_point1 in zip(shortest_path[:-1], shortest_path[1:]):
+                        image.draw_line(mid_point0, mid_point1, fill=(0, 0, 0, 255))
+                    image.show()
+                    input()
 
 surface = Polygon([[0,0], [0,500], [500,500], [500,0]])
 obstacles = [
@@ -115,15 +142,15 @@ obstacles = [
 ]
 
 om = ObstacleMetric(surface, obstacles)
-tom = TestObstacleMetric(om)
-# tom.show_obstacle_plane()
-om.build_point_visibility_polygons()
-# tom.show_visibility_polygons()
 om.build_visibility_subdivision()
-# tom.show_visibility_subdivision()
 om.build_visibility_graph()
-# tom.show_visibility_graph()
+tom = TestObstacleMetric(om)
+tom.show_obstacle_plane()
+tom.show_visibility_subdivision()
+tom.show_visibility_graph()
 
 # while True: tom.test_get_containing_polygon(); input()
 # while True: tom.test_get_visible_points(); input()
 while True: tom.test_get_shortest_path(); input()
+# while True: tom.test_get_point_distance_machine(); input()
+# tom.test_get_point_path_machine()
