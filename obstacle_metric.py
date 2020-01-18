@@ -174,35 +174,30 @@ class ObstacleMetric:
             return points
         return set()
 
+    def add_visibility_edges(self, point):
+        self.visibility_graph.add_node(point)
+        visible_points = self.get_visible_points(point)
+        self.visibility_graph.add_edges_from((point, visible_point) for visible_point in visible_points)
+        return bool(visible_points)
+
     def get_shortest_path(self, point0, point1):
         shortest_path = None
         if self.is_visible(point0, point1):
             shortest_path = [point0, point1]
         else:
-            self.visibility_graph.add_node(point0)
-            self.visibility_graph.add_node(point1)
-            visible_points0 = self.get_visible_points(point0)
-            visible_points1 = self.get_visible_points(point1)
-            if visible_points0 and visible_points1:
-                self.visibility_graph.add_edges_from((point0, visible_point) for visible_point in visible_points0)
-                self.visibility_graph.add_edges_from((point1, visible_point) for visible_point in visible_points1)
-
+            is_visible0 = self.add_visibility_edges(point0)
+            is_visible1 = self.add_visibility_edges(point1)
+            if is_visible0 and is_visible1:
                 # TODO: use depth search with euclidean distance as deceision factor
                 shortest_path = nx.dijkstra_path(self.visibility_graph, point0, point1)
-                return shortest_path
-
-            self.visibility_graph.remove_node(point0)
-            self.visibility_graph.remove_node(point1)
+            # TODO: what if the node is already part of the graph
+            self.visibility_graph.remove_nodes_from([point0, point1])
 
         return shortest_path
 
     def get_point_distance_machine(self, point, cutoff=None):
         point_distance_machine = None
-        self.visibility_graph.add_node(point)
-        visible_points = self.get_visible_points(point)
-        if visible_points:
-            for visible_point in visible_points:
-                self.visibility_graph.add_edge(point, visible_point)
+        if self.add_visibility_edges(point):
             path_legths = nx.single_source_dijkstra_path_length(self.visibility_graph, point, cutoff)
 
             def point_distance_machine(point1):
@@ -217,11 +212,7 @@ class ObstacleMetric:
 
     def get_point_path_machine(self, point, cutoff=None):
         point_path_machine = None
-        self.visibility_graph.add_node(point)
-        visible_points = self.get_visible_points(point)
-        if visible_points:
-            for visible_point in visible_points:
-                self.visibility_graph.add_edge(point, visible_point)
+        if self.add_visibility_edges(point):
             path_legths, paths = nx.single_source_dijkstra(self.visibility_graph, point, None, cutoff)
 
             def point_path_machine(point1):
@@ -241,19 +232,12 @@ class ObstacleMetric:
         elif self.is_visible(point0, point1):
             ret_val = True
         else:
-            self.visibility_graph.add_node(point0)
-            self.visibility_graph.add_node(point1)
-            visible_points0 = self.get_visible_points(point0)
-            visible_points1 = self.get_visible_points(point1)
-            if visible_points0 and visible_points1:
-                self.visibility_graph.add_edges_from((point0, visible_point) for visible_point in visible_points0)
-                self.visibility_graph.add_edges_from((point1, visible_point) for visible_point in visible_points1)
-
+            is_visible0 = self.add_visibility_edges(point0)
+            is_visible1 = self.add_visibility_edges(point1)
+            if is_visible0 and is_visible1:
                 shortest_path_length = nx.single_source_dijkstra_path_length(self.visibility_graph, point0, point1, cutoff=distance)
                 ret_val = shortest_path_length < distance
-
-            self.visibility_graph.remove_node(point0)
-            self.visibility_graph.remove_node(point1)
+            self.visibility_graph.remove_nodes_from([point0, point1])
 
         return ret_val
 
