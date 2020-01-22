@@ -51,7 +51,9 @@ class RtreeSet:
                 yield(other)
 
     def nearest(self, item, n=1):
-        search_radius = max(self.items[idx].distance(item) for idx in self.index.nearest(item.bounds, n)) * 1.01
-        buffer = item.buffer(search_radius)  # TODO: can do better
-        item_list = sorted(self.intersection(buffer), key=lambda other: item.distance(other))
+        item_list = list(self.index.nearest(item.bounds, n))
+        search_radius = max(self.items[idx].distance(item) for idx in item_list) * 1.01
+        if search_radius != 0:
+            buffer = item.buffer(search_radius)  # TODO: can do better
+            item_list = sorted(self.intersection(buffer), key=lambda other: item.distance(other))
         return item_list[:n]
