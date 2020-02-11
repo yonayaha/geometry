@@ -4,6 +4,7 @@ from shapely_extension import *
 from rtree_set import RtreeSet
 from spatial_graph import SpatialGraph
 import networkx as nx
+from scipy.spatial.distance import directed_hausdorff
 
 
 class ObstacleMetric:
@@ -89,8 +90,6 @@ class ObstacleMetric:
             point_visibility_polygons[point] = self.calc_visibility_polygon(point)
 
         print('building visibility subdivision')
-        self.visibility_polygons = RtreeSet()
-        self.polygon_visibility_points = dict()
         subdivision = {self.surface: set()}
         print(len(self.points))
         for i, point in enumerate(self.points):
@@ -100,11 +99,11 @@ class ObstacleMetric:
             for polygon, points in subdivision.items():
                 try:
                     intersection = polygon.intersection(visible_polygon)
-                    if type(intersection) is Polygon and intersection.area > 0.001:
+                    if type(intersection) is Polygon:
                         new_subdivision[intersection] = points | {point}
                     elif intersection.is_multipart_geometry():
                         for part in intersection:
-                            if type(part) is Polygon and part.area > 0.001:
+                            if type(part) is Polygon:
                                 new_subdivision[part] = points | {point}
                 except Exception as ex:
                     print(ex)
@@ -112,18 +111,42 @@ class ObstacleMetric:
 
                 try:
                     difference = polygon.difference(visible_polygon)
-                    if type(difference) is Polygon and difference.area > 0.001:
+                    if type(difference) is Polygon:
                         new_subdivision[difference] = points
                     elif difference.is_multipart_geometry():
                         for part in difference:
-                            if type(part) is Polygon and part.area > 0.001:
+                            if type(part) is Polygon:
                                 new_subdivision[part] = points
                 except Exception as ex:
                     print(ex)
                     print(polygon.area, visible_polygon.area)
 
+            for polygon0, points0 in list(new_subdivision.items()):
+                if polygon0 not in new_subdivision.keys():
+                    continue
+                closest_polygon = None
+                min_dist = float('inf')
+                for polygon1, points1 in new_subdivision.items():  # TODO: run over intersect polygons (save subdivision in rtree)
+                    if polygon1 is not polygon0 and points1.issubset(points0) and polygon0.distance(polygon1) == 0:
+                        hausdorff_distance = directed_hausdorff(polygon0.exterior.coords, polygon1.exterior.coords)[0]
+                        if hausdorff_distance < min_dist:
+                            closest_polygon = polygon1
+                            min_dist = hausdorff_distance
+                if min_dist < 0.01:
+                    union = closest_polygon.union(polygon0)
+                    if type(union) is Polygon:
+                        new_subdivision[union] = new_subdivision[closest_polygon]
+                    elif union.is_multipart_geometry():
+                        for part in union:
+                            if type(part) is Polygon:
+                                new_subdivision[part] = new_subdivision[closest_polygon]
+                    del new_subdivision[polygon0]
+                    del new_subdivision[closest_polygon]
+
             subdivision = new_subdivision
 
+        self.visibility_polygons = RtreeSet()
+        self.polygon_visibility_points = dict()
         for polygon, points in subdivision.items():
             if points:
                 self.polygon_visibility_points[polygon] = points

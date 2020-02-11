@@ -45,6 +45,8 @@ class RtreeSet:
             self.index.insert(id(item), item.bounds)
 
     def intersection(self, item):
+        if not item.bounds:
+            return []
         for idx in self.index.intersection(item.bounds):
             other = self.items[idx]
             if item.intersects(other):
