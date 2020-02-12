@@ -1,10 +1,12 @@
 from itertools import chain, product, cycle
 from functools import reduce
-from shapely_extension import *
-from rtree_set import RtreeSet
-from spatial_graph import SpatialGraph
 import networkx as nx
 from scipy.spatial.distance import directed_hausdorff
+
+from shapely_extension import *
+from rtree_set import RtreeSet
+from rtree_dict import RtreeDict
+from spatial_graph import SpatialGraph
 
 
 class ObstacleMetric:
@@ -12,7 +14,6 @@ class ObstacleMetric:
         self.surface = surface
         self.obstacles = RtreeSet(obstacles)
         self.points = [point for polygon in self.polygons() for point in polygon.points()]
-        self.visibility_polygons = None
         self.polygon_visibility_points = None
         self.visibility_graph = None
         self.diameter = self.calc_diameter()
@@ -83,28 +84,31 @@ class ObstacleMetric:
         else:
             return EmptyGeometry()
 
-    def build_visibility_subdivision(self):
+    def build_visibility_subdivision(self, tol=0):
         print('building point visibility polygons')
         point_visibility_polygons = dict()
         for point in self.points:
             point_visibility_polygons[point] = self.calc_visibility_polygon(point)
 
         print('building visibility subdivision')
-        subdivision = {self.surface: set()}
+        self.polygon_visibility_points = RtreeDict()
+        self.polygon_visibility_points[self.surface] = set()  # TODO: start from surface without obstacles
         print(len(self.points))
-        for i, point in enumerate(self.points):
-            print(i, len(subdivision))
-            new_subdivision = dict()
-            visible_polygon = point_visibility_polygons[point]
-            for polygon, points in subdivision.items():
+        for i, (point, visible_polygon) in enumerate(point_visibility_polygons.items()):
+            print(i, len(self.polygon_visibility_points))
+            for polygon in list(self.polygon_visibility_points.intersection(visible_polygon)):
+                points = self.polygon_visibility_points[polygon]
+
+                del self.polygon_visibility_points[polygon]
+
                 try:
                     intersection = polygon.intersection(visible_polygon)
                     if type(intersection) is Polygon:
-                        new_subdivision[intersection] = points | {point}
+                        self.polygon_visibility_points[intersection] = points | {point}
                     elif intersection.is_multipart_geometry():
                         for part in intersection:
                             if type(part) is Polygon:
-                                new_subdivision[part] = points | {point}
+                                self.polygon_visibility_points[part] = points | {point}
                 except Exception as ex:
                     print(ex)
                     print(polygon.area, visible_polygon.area)
@@ -112,45 +116,45 @@ class ObstacleMetric:
                 try:
                     difference = polygon.difference(visible_polygon)
                     if type(difference) is Polygon:
-                        new_subdivision[difference] = points
+                        self.polygon_visibility_points[difference] = points
                     elif difference.is_multipart_geometry():
                         for part in difference:
                             if type(part) is Polygon:
-                                new_subdivision[part] = points
+                                self.polygon_visibility_points[part] = points
                 except Exception as ex:
                     print(ex)
                     print(polygon.area, visible_polygon.area)
 
-            for polygon0, points0 in list(new_subdivision.items()):
-                if polygon0 not in new_subdivision.keys():
-                    continue
-                closest_polygon = None
-                min_dist = float('inf')
-                for polygon1, points1 in new_subdivision.items():  # TODO: run over intersect polygons (save subdivision in rtree)
-                    if polygon1 is not polygon0 and points1.issubset(points0) and polygon0.distance(polygon1) == 0:
-                        hausdorff_distance = directed_hausdorff(polygon0.exterior.coords, polygon1.exterior.coords)[0]
-                        if hausdorff_distance < min_dist:
-                            closest_polygon = polygon1
-                            min_dist = hausdorff_distance
-                if min_dist < 0.01:
-                    union = closest_polygon.union(polygon0)
-                    if type(union) is Polygon:
-                        new_subdivision[union] = new_subdivision[closest_polygon]
-                    elif union.is_multipart_geometry():
-                        for part in union:
-                            if type(part) is Polygon:
-                                new_subdivision[part] = new_subdivision[closest_polygon]
-                    del new_subdivision[polygon0]
-                    del new_subdivision[closest_polygon]
+            if tol:
+                for polygon0, points0 in list(self.polygon_visibility_points.items()):
+                    if polygon0 not in self.polygon_visibility_points:
+                        continue
+                    closest_polygon = None
+                    min_thickness = float('inf')
+                    for polygon1 in self.polygon_visibility_points.intersection(polygon0.buffer(0.001)):
+                        points1 = self.polygon_visibility_points[polygon1]
+                        if polygon1 is not polygon0 and points1.issubset(points0) and polygon0.distance(polygon1) == 0:
+                            thickness = directed_hausdorff(polygon0.exterior.coords, polygon1.exterior.coords)[0]
+                            if thickness < min_thickness:
+                                closest_polygon = polygon1
+                                min_thickness = thickness
+                    if min_thickness < tol:
+                        try:
+                            union = closest_polygon.union(polygon0)
+                            points = self.polygon_visibility_points[closest_polygon]
 
-            subdivision = new_subdivision
+                            del self.polygon_visibility_points[polygon0]
+                            del self.polygon_visibility_points[closest_polygon]
 
-        self.visibility_polygons = RtreeSet()
-        self.polygon_visibility_points = dict()
-        for polygon, points in subdivision.items():
-            if points:
-                self.polygon_visibility_points[polygon] = points
-                self.visibility_polygons.insert(polygon)
+                            if type(union) is Polygon:
+                                self.polygon_visibility_points[union] = points
+                            elif union.is_multipart_geometry():
+                                for part in union:
+                                    if type(part) is Polygon:
+                                        self.polygon_visibility_points[part] = points
+                        except Exception as ex:
+                            print(ex)
+                            print(polygon0.area, closest_polygon.area)
 
     def build_visibility_graph(self):
         print('building visibility graph')
@@ -187,7 +191,7 @@ class ObstacleMetric:
         return True
 
     def get_containing_polygon(self, point):
-        for polygon in self.visibility_polygons.intersection(point):
+        for polygon in self.polygon_visibility_points.intersection(point):
             return polygon
 
     def get_visible_points(self, point):

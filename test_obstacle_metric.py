@@ -131,6 +131,7 @@ class TestObstacleMetric:
 
                     for mid_point0, mid_point1 in zip(shortest_path[:-1], shortest_path[1:]):
                         image.draw_line(mid_point0, mid_point1, fill=(0, 0, 0, 255))
+
                     image.show()
                     input()
 
@@ -142,7 +143,7 @@ obstacles = [
 ]
 
 om = ObstacleMetric(surface, obstacles)
-om.build_visibility_subdivision()
+om.build_visibility_subdivision(0.01)
 om.build_visibility_graph()
 tom = TestObstacleMetric(om)
 tom.show_obstacle_plane()
