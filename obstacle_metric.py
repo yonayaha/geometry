@@ -13,6 +13,7 @@ class ObstacleMetric:
     def __init__(self, surface, obstacles):
         self.surface = surface
         self.obstacles = RtreeSet(obstacles)
+        # TODO: create one polygon with holes (to avoid duplicate nodes)
         self.points = [point for polygon in self.polygons() for point in polygon.points()]
         self.polygon_visibility_points = None
         self.visibility_graph = None
@@ -96,44 +97,39 @@ class ObstacleMetric:
         print(len(self.points))
         for i, (point, visible_polygon) in enumerate(point_visibility_polygons.items()):
             print(i, len(self.polygon_visibility_points))
+            added_parts = []
             for polygon in list(self.polygon_visibility_points.intersection(visible_polygon)):
                 points = self.polygon_visibility_points[polygon]
 
-                del self.polygon_visibility_points[polygon]
+                if visible_polygon.contains(polygon):
+                    self.polygon_visibility_points[polygon] = points | {point}
+                else:
+                    del self.polygon_visibility_points[polygon]
+                    try:
+                        intersection = polygon.intersection(visible_polygon)
+                        added_parts.extend(self.update_polygon_visibility_points(intersection, points | {point}))
+                    except Exception as ex:
+                        print(ex)
+                        print(polygon.area, visible_polygon.area)
 
-                try:
-                    intersection = polygon.intersection(visible_polygon)
-                    if type(intersection) is Polygon:
-                        self.polygon_visibility_points[intersection] = points | {point}
-                    elif intersection.is_multipart_geometry():
-                        for part in intersection:
-                            if type(part) is Polygon:
-                                self.polygon_visibility_points[part] = points | {point}
-                except Exception as ex:
-                    print(ex)
-                    print(polygon.area, visible_polygon.area)
-
-                try:
-                    difference = polygon.difference(visible_polygon)
-                    if type(difference) is Polygon:
-                        self.polygon_visibility_points[difference] = points
-                    elif difference.is_multipart_geometry():
-                        for part in difference:
-                            if type(part) is Polygon:
-                                self.polygon_visibility_points[part] = points
-                except Exception as ex:
-                    print(ex)
-                    print(polygon.area, visible_polygon.area)
+                    try:
+                        difference = polygon.difference(visible_polygon)
+                        added_parts.extend(self.update_polygon_visibility_points(difference, points))
+                    except Exception as ex:
+                        print(ex)
+                        print(polygon.area, visible_polygon.area)
 
             if tol:
-                for polygon0, points0 in list(self.polygon_visibility_points.items()):
+                i = 0
+                while i < len(added_parts):
+                    polygon0 = added_parts[i]
+                    i += 1
                     if polygon0 not in self.polygon_visibility_points:
                         continue
                     closest_polygon = None
                     min_thickness = float('inf')
                     for polygon1 in self.polygon_visibility_points.intersection(polygon0.buffer(0.001)):
-                        points1 = self.polygon_visibility_points[polygon1]
-                        if polygon1 is not polygon0 and points1.issubset(points0) and polygon0.distance(polygon1) == 0:
+                        if polygon1 is not polygon0 and polygon0.distance(polygon1) == 0:
                             thickness = directed_hausdorff(polygon0.exterior.coords, polygon1.exterior.coords)[0]
                             if thickness < min_thickness:
                                 closest_polygon = polygon1
@@ -146,15 +142,22 @@ class ObstacleMetric:
                             del self.polygon_visibility_points[polygon0]
                             del self.polygon_visibility_points[closest_polygon]
 
-                            if type(union) is Polygon:
-                                self.polygon_visibility_points[union] = points
-                            elif union.is_multipart_geometry():
-                                for part in union:
-                                    if type(part) is Polygon:
-                                        self.polygon_visibility_points[part] = points
+                            # added_parts.extend(self.update_polygon_visibility_points(union, points))  # TODO: fix
+                            self.update_polygon_visibility_points(union, points)
+
                         except Exception as ex:
                             print(ex)
                             print(polygon0.area, closest_polygon.area)
+
+    def update_polygon_visibility_points(self, polygon, points):
+        parts = []
+        if type(polygon) is Polygon:
+            parts = [polygon]
+        elif polygon.is_multipart_geometry():
+            parts = [part for part in polygon if type(part) is Polygon]
+        for part in parts:
+            self.polygon_visibility_points[part] = points
+        return parts
 
     def build_visibility_graph(self):
         print('building visibility graph')

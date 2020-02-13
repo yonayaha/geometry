@@ -15,8 +15,9 @@ class RtreeDict(RtreeSet):
         return RtreeDict, (list(self._items.values()),)
 
     def __setitem__(self, key, value):
+        if key not in self:
+            self.index.insert(id(key), key.bounds)
         self._items[id(key)] = (key, value)
-        self.index.insert(id(key), key.bounds)
 
     def __str__(self):
         return str({str(key): str(value) for key, value in self.items()})
