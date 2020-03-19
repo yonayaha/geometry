@@ -1,4 +1,4 @@
-from itertools import chain, product, cycle
+from itertools import chain, product, combinations, cycle, repeat
 from functools import reduce
 import networkx as nx
 from scipy.spatial.distance import directed_hausdorff
@@ -10,41 +10,56 @@ from spatial_graph import SpatialGraph
 
 
 class ObstacleMetric:
+    EPSILON = 1e-12
+
     def __init__(self, surface, obstacles):
-        self.surface = surface
-        self.obstacles = RtreeSet(obstacles)
-        # TODO: create one polygon with holes (to avoid duplicate nodes)
-        self.points = [point for polygon in self.polygons() for point in polygon.points()]
+        self.obstacle_surface = reduce(BaseGeometry.difference, obstacles, surface)
+        if self.obstacle_surface.is_multipart_geometry():
+            self.obstacle_surface = max(self.obstacle_surface, key=lambda part: part.area)
         self.polygon_visibility_points = None
         self.visibility_graph = None
         self.diameter = self.calc_diameter()
         self.bounding_box = self.calc_bounding_box()
 
     def polygons(self):
-        return chain([self.surface], self.obstacles)
+        return chain([self.obstacle_surface.exterior], self.obstacle_surface.interiors)
+
+    def points(self):
+        return (point for polygon in self.polygons() for point in polygon.points())
 
     def segments(self):
         return (segment for polygon in self.polygons() for segment in polygon.segments())
 
     def calc_diameter(self):
-        left, bottom, right, top = self.surface.bounds
+        left, bottom, right, top = self.obstacle_surface.bounds
         return np.linalg.norm(np.array([right, top]) - np.array([left, bottom]))
 
     def calc_bounding_box(self):
-         union = reduce(BaseGeometry.union, self.obstacles, self.surface)
-         return Polygon.from_bounds(*union.buffer(1).bounds).exterior
+         return Polygon.from_bounds(*self.obstacle_surface.buffer(1).bounds).exterior
 
     def calc_visibility_polygon(self, point, radius=None):
-        visibility_polygon = self.surface
+        visibility_polygon = self.obstacle_surface
         if radius is not None:
             visibility_polygon = visibility_polygon.intersection(point.buffer(radius))
-        for obstacle in self.obstacles:
-            visibility_polygon = visibility_polygon.difference(obstacle)
         for segment in self.segments():
-            if segment.intersects(point):
-                continue
-            shadow_polygon = self.calc_shadow_polygon(point, segment)
-            visibility_polygon = visibility_polygon.difference(shadow_polygon)
+            if not segment.intersects(point) and segment.intersects(visibility_polygon):
+
+                point0, point1 = segment.points()
+                vector = point1 - point0
+                direction = vector / np.linalg.norm(vector)
+                buffered_segment = LineString([point0 - self.EPSILON * direction, point1 + self.EPSILON * direction])
+                shadow_polygon = self.calc_shadow_polygon(point, buffered_segment)
+                if shadow_polygon.is_valid:
+                    try:
+                        shadow_diff = visibility_polygon.difference(shadow_polygon)
+                        if shadow_diff.is_valid:
+                            visibility_polygon = shadow_diff
+                    except Exception as ex:
+                        print(ex)
+
+        if visibility_polygon.is_multipart_geometry() and len(visibility_polygon) > 0:
+            visibility_polygon = max(visibility_polygon, key=lambda part: part.area)
+
         return visibility_polygon
 
     def calc_shadow_polygon(self, point, segment):
@@ -88,15 +103,24 @@ class ObstacleMetric:
     def build_visibility_subdivision(self, tol=0):
         print('building point visibility polygons')
         point_visibility_polygons = dict()
-        for point in self.points:
-            point_visibility_polygons[point] = self.calc_visibility_polygon(point)
+        for i, (polygon, sign) in enumerate(chain([(self.obstacle_surface.exterior, -1)],
+                                                  zip(self.obstacle_surface.interiors, repeat(1)))):
+            print(i, '/', len(self.obstacle_surface.interiors))
+            points = polygon.points()
+            if not polygon.is_ccw:
+                points.reverse()
+            for point0, point1, point2 in zip(*(points[i:] + points[:i] for i in range(3))):
+                vector0 = point1 - point0
+                vector1 = point2 - point1
+                if np.sign(np.cross(vector0, vector1)) == sign:
+                    visibility_polygon = self.calc_visibility_polygon(point1)
+                    point_visibility_polygons[point1] = visibility_polygon
 
         print('building visibility subdivision')
         self.polygon_visibility_points = RtreeDict()
-        self.polygon_visibility_points[self.surface] = set()  # TODO: start from surface without obstacles
-        print(len(self.points))
+        self.polygon_visibility_points[self.obstacle_surface] = set()
         for i, (point, visible_polygon) in enumerate(point_visibility_polygons.items()):
-            print(i, len(self.polygon_visibility_points))
+            print(i, '/', len(point_visibility_polygons), ':', len(self.polygon_visibility_points))
             added_parts = []
             for polygon in list(self.polygon_visibility_points.intersection(visible_polygon)):
                 points = self.polygon_visibility_points[polygon]
@@ -128,8 +152,8 @@ class ObstacleMetric:
                         continue
                     closest_polygon = None
                     min_thickness = float('inf')
-                    for polygon1 in self.polygon_visibility_points.intersection(polygon0.buffer(0.001)):
-                        if polygon1 is not polygon0 and polygon0.distance(polygon1) == 0:
+                    for polygon1 in self.polygon_visibility_points.intersection(polygon0.buffer(self.EPSILON)):
+                        if polygon1 is not polygon0 and polygon0.distance(polygon1) < self.EPSILON:
                             thickness = directed_hausdorff(polygon0.exterior.coords, polygon1.exterior.coords)[0]
                             if thickness < min_thickness:
                                 closest_polygon = polygon1
@@ -151,47 +175,27 @@ class ObstacleMetric:
 
     def update_polygon_visibility_points(self, polygon, points):
         parts = []
-        if type(polygon) is Polygon:
+        if type(polygon) is Polygon and not polygon.is_empty:
             parts = [polygon]
         elif polygon.is_multipart_geometry():
-            parts = [part for part in polygon if type(part) is Polygon]
+            parts = [part for part in polygon if type(part) is Polygon and not part.is_empty]
         for part in parts:
             self.polygon_visibility_points[part] = points
         return parts
 
     def build_visibility_graph(self):
         print('building visibility graph')
-        # TODO: use visibility_polygons - foreach 2 points, check if the connecting segment is within visibility polygon
         self.visibility_graph = SpatialGraph()
-
-        for polygon in chain([self.surface], self.obstacles):
-            for point in polygon.points():
-                self.visibility_graph.add_node(point)
-
-        for polygon in chain([self.surface], self.obstacles):
-            for segment in polygon.segments():
-                self.visibility_graph.add_edge(*segment.points())
-
-        for polygon0, polygon1 in product(chain([self.surface], self.obstacles), repeat=2):
-            for point0 in polygon0.points():
-                segments = polygon1.segments()
-                segments.append(segments[0])
-                for segment0, segment1 in zip(segments[:-1], segments[1:]):
-                    point1 = segment1[0]
-                    if point0 == point1:
-                        continue
-                    if self.is_visible(point0, point1):
-                        self.visibility_graph.add_edge(point0, point1)
+        # TODO: avoid concave points
+        self.visibility_graph.add_nodes_from(self.points())
+        self.visibility_graph.add_edges_from((segment.points() for segment in self.segments()))
+        for point0, point1 in combinations(self.points(), 2):
+            if self.is_visible(point0, point1):
+                self.visibility_graph.add_edge(point0, point1)
 
     def is_visible(self, point0, point1):
         segment = LineString((point0, point1))
-        if not self.surface.contains(segment):
-            return False
-        for polygon in self.obstacles.intersection(segment):
-            if segment.intersection(polygon) not in {point0, point1, MultiPoint([point0, point1])}:
-                # print(segment.intersection(polygon))
-                return False
-        return True
+        return self.obstacle_surface.contains(segment)
 
     def get_containing_polygon(self, point):
         for polygon in self.polygon_visibility_points.intersection(point):

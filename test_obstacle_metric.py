@@ -1,10 +1,10 @@
 import random
-from shapely_extension import *
 import pickle
 import time
 
 from obstacle_metric import ObstacleMetric
 from surface_image import SurfaceImage
+from shapely_extension import *
 
 
 class TestObstacleMetric:
@@ -12,14 +12,15 @@ class TestObstacleMetric:
         self.obstacle_metric = obstacle_metric
 
     def obstacle_surface_image(self):
-        image = SurfaceImage(self.obstacle_metric.surface)
-        for obstacle in self.obstacle_metric.obstacles:
+        image = SurfaceImage(self.obstacle_metric.obstacle_surface)
+        for obstacle_linestring in self.obstacle_metric.obstacle_surface.interiors:
+            obstacle = Polygon.from_points(obstacle_linestring.points())
             image.draw_polygon(obstacle, fill=(0, 0, 0, 255))
 
         return image
 
     def random_point(self):
-        bounds = self.obstacle_metric.surface.bounds
+        bounds = self.obstacle_metric.obstacle_surface.bounds
         x = bounds[0] + random.random() * (bounds[2] - bounds[0])
         y = bounds[1] + random.random() * (bounds[3] - bounds[1])
         return Point(x, y)
@@ -47,8 +48,7 @@ class TestObstacleMetric:
     def test_get_containing_polygon(self):
         while True:
             point = self.random_point()
-            if self.obstacle_metric.surface.contains(point) and not any(map(
-                    lambda obstacle: obstacle.contains(point), self.obstacle_metric.obstacles)):
+            if self.obstacle_metric.obstacle_surface.contains(point):
                 polygon = self.obstacle_metric.get_containing_polygon(point)
 
                 image = self.obstacle_surface_image()
@@ -135,23 +135,32 @@ class TestObstacleMetric:
                     image.show()
                     input()
 
-surface = Polygon([[0,0], [0,500], [500,500], [500,0]])
-obstacles = [
-    # Polygon([[100,100],[100,400],[400,400],[400,100],[300,100],[300,300],[200,300],[200,100]])
-    Polygon([[100,100],[100,400],[200,400],[200,100]]),
-    Polygon([[300,100],[300,300],[400,300],[400,100]])
-]
 
-om = ObstacleMetric(surface, obstacles)
-om.build_visibility_subdivision(0.01)
-om.build_visibility_graph()
-tom = TestObstacleMetric(om)
-tom.show_obstacle_plane()
-tom.show_visibility_subdivision()
-tom.show_visibility_graph()
+if __name__ == '__main__':
+    surface = Polygon([[0,0], [0,500], [500,500], [500,0]])
+    # obstacles = [Polygon([[x, y], [x, y + 50], [x + 50, y + 50], [x + 50, y]])
+    #              for x in range(25, 500, 100) for y in range(25, 500, 100)]
+    obstacles = [
+    #     Polygon([[100,100],[100,400],[400,400],[400,100],[300,100],[300,300],[200,300],[200,100]])
+        Polygon([[100,100],[100,400],[200,400],[200,100]]),
+        Polygon([[300,100],[300,300],[400,300],[400,100]])
+    ]
 
-# while True: tom.test_get_containing_polygon(); input()
-# while True: tom.test_get_visible_points(); input()
-while True: tom.test_get_shortest_path(); input()
-# while True: tom.test_get_point_distance_machine(); input()
-# tom.test_get_point_path_machine()
+    # with open('obstacleSurface.pkl', 'rb') as fp:
+    #     om = pickle.load(fp)
+    om = ObstacleMetric(surface, obstacles)
+    om.build_visibility_subdivision(0.01)
+    om.build_visibility_graph()
+    # with open('obstacleSurface.pkl', 'wb') as fp:
+    #     pickle.dump(om, fp)
+
+    tom = TestObstacleMetric(om)
+    # tom.show_obstacle_plane()
+    tom.show_visibility_subdivision()
+    # tom.show_visibility_graph()
+
+    # while True: tom.test_get_containing_polygon(); input()
+    # while True: tom.test_get_visible_points(); input()
+    while True: tom.test_get_shortest_path(); input()
+    # while True: tom.test_get_point_distance_machine(); input()
+    # tom.test_get_point_path_machine()
