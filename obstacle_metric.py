@@ -1,10 +1,9 @@
-from itertools import chain, product, combinations, cycle, repeat
+from itertools import chain, combinations, cycle, repeat
 from functools import reduce
 import networkx as nx
 from scipy.spatial.distance import directed_hausdorff
 
 from shapely_extension import *
-from rtree_set import RtreeSet
 from rtree_dict import RtreeDict
 from spatial_graph import SpatialGraph
 
@@ -101,11 +100,11 @@ class ObstacleMetric:
             return EmptyGeometry()
 
     def build_visibility_subdivision(self, tol=0):
-        print('building point visibility polygons')
+        # print('building point visibility polygons')
         point_visibility_polygons = dict()
         for i, (polygon, sign) in enumerate(chain([(self.obstacle_surface.exterior, -1)],
                                                   zip(self.obstacle_surface.interiors, repeat(1)))):
-            print(i, '/', len(self.obstacle_surface.interiors))
+            # print(i, '/', len(self.obstacle_surface.interiors))
             points = polygon.points()
             if not polygon.is_ccw:
                 points.reverse()
@@ -116,11 +115,11 @@ class ObstacleMetric:
                     visibility_polygon = self.calc_visibility_polygon(point1)
                     point_visibility_polygons[point1] = visibility_polygon
 
-        print('building visibility subdivision')
+        # print('building visibility subdivision')
         self.polygon_visibility_points = RtreeDict()
         self.polygon_visibility_points[self.obstacle_surface] = set()
         for i, (point, visible_polygon) in enumerate(point_visibility_polygons.items()):
-            print(i, '/', len(point_visibility_polygons), ':', len(self.polygon_visibility_points))
+            # print(i, '/', len(point_visibility_polygons), ':', len(self.polygon_visibility_points))
             added_parts = []
             for polygon in list(self.polygon_visibility_points.intersection(visible_polygon)):
                 points = self.polygon_visibility_points[polygon]
@@ -134,14 +133,14 @@ class ObstacleMetric:
                         added_parts.extend(self.update_polygon_visibility_points(intersection, points | {point}))
                     except Exception as ex:
                         print(ex)
-                        print(polygon.area, visible_polygon.area)
+                        # print(polygon.area, visible_polygon.area)
 
                     try:
                         difference = polygon.difference(visible_polygon)
                         added_parts.extend(self.update_polygon_visibility_points(difference, points))
                     except Exception as ex:
                         print(ex)
-                        print(polygon.area, visible_polygon.area)
+                        # print(polygon.area, visible_polygon.area)
 
             if tol:
                 i = 0
@@ -171,7 +170,7 @@ class ObstacleMetric:
 
                         except Exception as ex:
                             print(ex)
-                            print(polygon0.area, closest_polygon.area)
+                            # print(polygon0.area, closest_polygon.area)
 
     def update_polygon_visibility_points(self, polygon, points):
         parts = []
@@ -184,7 +183,7 @@ class ObstacleMetric:
         return parts
 
     def build_visibility_graph(self):
-        print('building visibility graph')
+        # print('building visibility graph')
         self.visibility_graph = SpatialGraph()
         # TODO: avoid concave points
         self.visibility_graph.add_nodes_from(self.points())
@@ -254,7 +253,7 @@ class ObstacleMetric:
                     return [point, point1]
                 visible_points = [point2 for point2 in (self.get_visible_points(point1) or []) if point2 in path_legths]
                 if visible_points:
-                    return min((point1.distance(point2) + path_legths[point2], paths[point2]) for point2 in visible_points)[1] + [point1]
+                    return paths[min(visible_points, key=lambda point2: point1.distance(point2) + path_legths[point2])] + [point1]
 
         self.visibility_graph.remove_node(point)
         return point_path_machine

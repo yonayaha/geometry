@@ -5,12 +5,10 @@ from shapely.geometry.base import *
 
 BaseGeometry.__bool__ = lambda self: not self.is_empty
 BaseGeometry.is_multipart_geometry = lambda self: issubclass(type(self), BaseMultipartGeometry)
-# BaseGeometry.__hash__ = lambda self: id(self)
 
 Point.__add__ = lambda self, vector: Point(np.array(self) + vector)
 Point.__sub__ = lambda self, other: np.array(self) - np.array(other)
 Point.__hash__ = lambda self: hash(tuple(zip(*self.xy)))
-# Point.__hash__ = lambda self: id(self)
 
 LineString.__hash__ = lambda self: hash(tuple(zip(*self.xy)))
 LineString.points = lambda self: [Point(xy) for xy in zip(*self.xy)]
@@ -25,7 +23,6 @@ LinearRing.points = lambda self: [Point(xy) for xy in zip(*self.xy)][:-1]
 LinearRing.from_points = lambda point_list: LinearRing([np.array(point) for point in point_list])
 
 Polygon.__hash__ = lambda self: hash((tuple(zip(*self.exterior.xy)), *(tuple(zip(*interior.xy)) for interior in self.interiors)))
-# Polygon.__hash__ = lambda self: id(self)
 Polygon.points = lambda self: self.exterior.points() if self.exterior else []
 Polygon.segments = lambda self: self.exterior.segments() if self.exterior else []
 Polygon.from_points = lambda point_list: Polygon([np.array(point) for point in point_list])
