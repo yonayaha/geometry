@@ -6,7 +6,7 @@ This package includes some utils to be used in the field of computational geomet
 
 *RtreeSet* gives an abstraction to the common module of *Rtree*. It enables indexing of *shapely.geometry* objects (*Point*, *LineString*, *Polygon*, ...) simply by putting them in a set-like collection. The *insert*/*delete* operations doesn't require any information but the shape itself. Two geometric methods are implemented: *intersection(item)* which returns a generator of items in the collection that intersects the given item, and *nearest(item, n=1)* which returns the *n* nearest items in the collection to the given item.
 
-*RtreeDict* works similarly to *RtreeSet* except that each item in the collection has also a value that can be of each type.
+*RtreeDict* works similarly to *RtreeSet* except that each item in the collection has also a value that can be of any type.
 
 *ObstacleMetric* gives an efficient way (with very heavy preprocessing) to calculate shortest path between points in a surface with obstacle. It is based on the fact that the shortest path is either the euclidian path or it goes through the nodes (corners) of the obstacles. The algorighm is working as follows:
 1. For each (convex) node, calculate its *visibility polygon* (the area which is visible from that point).
