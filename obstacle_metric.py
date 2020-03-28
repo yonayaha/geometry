@@ -17,37 +17,107 @@ class ObstacleMetric:
             self.obstacle_surface = max(self.obstacle_surface, key=lambda part: part.area)
         self.polygon_visibility_points = None
         self.visibility_graph = None
-        self.diameter = self.calc_diameter()
-        self.bounding_box = self.calc_bounding_box()
+        self.diameter = self._calc_diameter()
+        self.bounding_box = self._calc_bounding_box()
 
-    def polygons(self):
+    def run_preprocessing(self, tol=0):
+        point_visibility_polygons = self._calc_visibility_polygons()
+        self._build_visibility_subdivision(point_visibility_polygons, tol)
+        self._build_visibility_graph()
+
+    def get_shortest_path(self, point0, point1):
+        shortest_path = None
+        if self._is_visible(point0, point1):
+            shortest_path = [point0, point1]
+        else:
+            is_visible0 = self._add_visibility_edges(point0)
+            is_visible1 = self._add_visibility_edges(point1)
+            if is_visible0 and is_visible1:
+                # TODO: use depth search with euclidean distance as deceision factor
+                shortest_path = nx.dijkstra_path(self.visibility_graph, point0, point1)
+            # TODO: what if the node is already part of the graph
+            self.visibility_graph.remove_nodes_from([point0, point1])
+
+        return shortest_path
+
+    def get_point_distance_machine(self, point, cutoff=None):
+        point_distance_machine = None
+        if self._add_visibility_edges(point):
+            path_legths = nx.single_source_dijkstra_path_length(self.visibility_graph, point, cutoff)
+
+            def point_distance_machine(point1):
+                if self._is_visible(point, point1):
+                    return point.distance(point1)
+                visible_points = [point2 for point2 in (self._get_visible_points(point1) or []) if point2 in path_legths]
+                if visible_points:
+                    return min(point1.distance(point2) + path_legths[point2] for point2 in visible_points)
+
+        self.visibility_graph.remove_node(point)
+        return point_distance_machine
+
+    def get_point_path_machine(self, point, cutoff=None):
+        point_path_machine = None
+        if self._add_visibility_edges(point):
+            path_legths, paths = nx.single_source_dijkstra(self.visibility_graph, point, None, cutoff)
+
+            def point_path_machine(point1):
+                if self._is_visible(point, point1):
+                    return [point, point1]
+                visible_points = [point2 for point2 in (self._get_visible_points(point1) or []) if point2 in path_legths]
+                if visible_points:
+                    return paths[min(visible_points, key=lambda point2: point1.distance(point2) + path_legths[point2])] + [point1]
+
+        self.visibility_graph.remove_node(point)
+        return point_path_machine
+
+    def is_within_radius(self, point0, point1, distance):
+        ret_val = None
+        if point0.distance(point1) > distance:
+            ret_val = False
+        elif self._is_visible(point0, point1):
+            ret_val = True
+        else:
+            is_visible0 = self._add_visibility_edges(point0)
+            is_visible1 = self._add_visibility_edges(point1)
+            if is_visible0 and is_visible1:
+                shortest_path_length = nx.single_source_dijkstra_path_length(self.visibility_graph, point0, point1, cutoff=distance)
+                ret_val = shortest_path_length < distance
+            self.visibility_graph.remove_nodes_from([point0, point1])
+
+        return ret_val
+
+    def calc_obstacle_metric_distance_polygon(self, point):
+        # TODO
+        return
+
+    def _polygons(self):
         return chain([self.obstacle_surface.exterior], self.obstacle_surface.interiors)
 
-    def points(self):
-        return (point for polygon in self.polygons() for point in polygon.points())
+    def _points(self):
+        return (point for polygon in self._polygons() for point in polygon.points())
 
-    def segments(self):
-        return (segment for polygon in self.polygons() for segment in polygon.segments())
+    def _segments(self):
+        return (segment for polygon in self._polygons() for segment in polygon.segments())
 
-    def calc_diameter(self):
+    def _calc_diameter(self):
         left, bottom, right, top = self.obstacle_surface.bounds
         return np.linalg.norm(np.array([right, top]) - np.array([left, bottom]))
 
-    def calc_bounding_box(self):
+    def _calc_bounding_box(self):
          return Polygon.from_bounds(*self.obstacle_surface.buffer(1).bounds).exterior
 
-    def calc_visibility_polygon(self, point, radius=None):
+    def _calc_visibility_polygon(self, point, radius=None):
         visibility_polygon = self.obstacle_surface
         if radius is not None:
             visibility_polygon = visibility_polygon.intersection(point.buffer(radius))
-        for segment in self.segments():
+        for segment in self._segments():
             if not segment.intersects(point) and segment.intersects(visibility_polygon):
 
                 point0, point1 = segment.points()
                 vector = point1 - point0
                 direction = vector / np.linalg.norm(vector)
                 buffered_segment = LineString([point0 - self.EPSILON * direction, point1 + self.EPSILON * direction])
-                shadow_polygon = self.calc_shadow_polygon(point, buffered_segment)
+                shadow_polygon = self._calc_shadow_polygon(point, buffered_segment)
                 if shadow_polygon.is_valid:
                     try:
                         shadow_diff = visibility_polygon.difference(shadow_polygon)
@@ -61,7 +131,7 @@ class ObstacleMetric:
 
         return visibility_polygon
 
-    def calc_shadow_polygon(self, point, segment):
+    def _calc_shadow_polygon(self, point, segment):
         point0, point1 = segment.points()
         if not LinearRing.from_points([point, point0, point1]).is_ccw:
             point0, point1 = point1, point0
@@ -99,7 +169,7 @@ class ObstacleMetric:
         else:
             return EmptyGeometry()
 
-    def build_visibility_subdivision(self, tol=0):
+    def _calc_visibility_polygons(self):
         # print('building point visibility polygons')
         point_visibility_polygons = dict()
         for i, (polygon, sign) in enumerate(chain([(self.obstacle_surface.exterior, -1)],
@@ -112,9 +182,11 @@ class ObstacleMetric:
                 vector0 = point1 - point0
                 vector1 = point2 - point1
                 if np.sign(np.cross(vector0, vector1)) == sign:
-                    visibility_polygon = self.calc_visibility_polygon(point1)
+                    visibility_polygon = self._calc_visibility_polygon(point1)
                     point_visibility_polygons[point1] = visibility_polygon
+        return point_visibility_polygons
 
+    def _build_visibility_subdivision(self, point_visibility_polygons, tol=0):
         # print('building visibility subdivision')
         self.polygon_visibility_points = RtreeDict()
         self.polygon_visibility_points[self.obstacle_surface] = set()
@@ -130,14 +202,14 @@ class ObstacleMetric:
                     del self.polygon_visibility_points[polygon]
                     try:
                         intersection = polygon.intersection(visible_polygon)
-                        added_parts.extend(self.update_polygon_visibility_points(intersection, points | {point}))
+                        added_parts.extend(self._update_polygon_visibility_points(intersection, points | {point}))
                     except Exception as ex:
                         print(ex)
                         # print(polygon.area, visible_polygon.area)
 
                     try:
                         difference = polygon.difference(visible_polygon)
-                        added_parts.extend(self.update_polygon_visibility_points(difference, points))
+                        added_parts.extend(self._update_polygon_visibility_points(difference, points))
                     except Exception as ex:
                         print(ex)
                         # print(polygon.area, visible_polygon.area)
@@ -166,13 +238,13 @@ class ObstacleMetric:
                             del self.polygon_visibility_points[closest_polygon]
 
                             # added_parts.extend(self.update_polygon_visibility_points(union, points))  # TODO: fix
-                            self.update_polygon_visibility_points(union, points)
+                            self._update_polygon_visibility_points(union, points)
 
                         except Exception as ex:
                             print(ex)
                             # print(polygon0.area, closest_polygon.area)
 
-    def update_polygon_visibility_points(self, polygon, points):
+    def _update_polygon_visibility_points(self, polygon, points):
         parts = []
         if type(polygon) is Polygon and not polygon.is_empty:
             parts = [polygon]
@@ -182,98 +254,33 @@ class ObstacleMetric:
             self.polygon_visibility_points[part] = points
         return parts
 
-    def build_visibility_graph(self):
+    def _build_visibility_graph(self):
         # print('building visibility graph')
         self.visibility_graph = SpatialGraph()
         # TODO: avoid concave points
-        self.visibility_graph.add_nodes_from(self.points())
-        self.visibility_graph.add_edges_from((segment.points() for segment in self.segments()))
-        for point0, point1 in combinations(self.points(), 2):
-            if self.is_visible(point0, point1):
+        self.visibility_graph.add_nodes_from(self._points())
+        self.visibility_graph.add_edges_from((segment.points() for segment in self._segments()))
+        for point0, point1 in combinations(self._points(), 2):
+            if self._is_visible(point0, point1):
                 self.visibility_graph.add_edge(point0, point1)
 
-    def is_visible(self, point0, point1):
+    def _is_visible(self, point0, point1):
         segment = LineString((point0, point1))
         return self.obstacle_surface.contains(segment)
 
-    def get_containing_polygon(self, point):
+    def _get_containing_polygon(self, point):
         for polygon in self.polygon_visibility_points.intersection(point):
             return polygon
 
-    def get_visible_points(self, point):
-        polygon = self.get_containing_polygon(point)
+    def _get_visible_points(self, point):
+        polygon = self._get_containing_polygon(point)
         if polygon:
             points = self.polygon_visibility_points[polygon]
             return points
         return set()
 
-    def add_visibility_edges(self, point):
+    def _add_visibility_edges(self, point):
         self.visibility_graph.add_node(point)
-        visible_points = self.get_visible_points(point)
+        visible_points = self._get_visible_points(point)
         self.visibility_graph.add_edges_from((point, visible_point) for visible_point in visible_points)
         return bool(visible_points)
-
-    def get_shortest_path(self, point0, point1):
-        shortest_path = None
-        if self.is_visible(point0, point1):
-            shortest_path = [point0, point1]
-        else:
-            is_visible0 = self.add_visibility_edges(point0)
-            is_visible1 = self.add_visibility_edges(point1)
-            if is_visible0 and is_visible1:
-                # TODO: use depth search with euclidean distance as deceision factor
-                shortest_path = nx.dijkstra_path(self.visibility_graph, point0, point1)
-            # TODO: what if the node is already part of the graph
-            self.visibility_graph.remove_nodes_from([point0, point1])
-
-        return shortest_path
-
-    def get_point_distance_machine(self, point, cutoff=None):
-        point_distance_machine = None
-        if self.add_visibility_edges(point):
-            path_legths = nx.single_source_dijkstra_path_length(self.visibility_graph, point, cutoff)
-
-            def point_distance_machine(point1):
-                if self.is_visible(point, point1):
-                    return point.distance(point1)
-                visible_points = [point2 for point2 in (self.get_visible_points(point1) or []) if point2 in path_legths]
-                if visible_points:
-                    return min(point1.distance(point2) + path_legths[point2] for point2 in visible_points)
-
-        self.visibility_graph.remove_node(point)
-        return point_distance_machine
-
-    def get_point_path_machine(self, point, cutoff=None):
-        point_path_machine = None
-        if self.add_visibility_edges(point):
-            path_legths, paths = nx.single_source_dijkstra(self.visibility_graph, point, None, cutoff)
-
-            def point_path_machine(point1):
-                if self.is_visible(point, point1):
-                    return [point, point1]
-                visible_points = [point2 for point2 in (self.get_visible_points(point1) or []) if point2 in path_legths]
-                if visible_points:
-                    return paths[min(visible_points, key=lambda point2: point1.distance(point2) + path_legths[point2])] + [point1]
-
-        self.visibility_graph.remove_node(point)
-        return point_path_machine
-
-    def is_within_radius(self, point0, point1, distance):
-        ret_val = None
-        if point0.distance(point1) > distance:
-            ret_val = False
-        elif self.is_visible(point0, point1):
-            ret_val = True
-        else:
-            is_visible0 = self.add_visibility_edges(point0)
-            is_visible1 = self.add_visibility_edges(point1)
-            if is_visible0 and is_visible1:
-                shortest_path_length = nx.single_source_dijkstra_path_length(self.visibility_graph, point0, point1, cutoff=distance)
-                ret_val = shortest_path_length < distance
-            self.visibility_graph.remove_nodes_from([point0, point1])
-
-        return ret_val
-
-    def calc_obstacle_metric_distance_polygon(self, point):
-        # TODO
-        return
