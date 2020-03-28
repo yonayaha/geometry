@@ -10,6 +10,6 @@ This package includes some utils to be used in the field of computational geomet
 
 *ObstacleMetric* gives an efficient way (with very heavy preprocessing) to calculate shortest path between points in a surface with obstacle. It is based on the fact that the shortest path is either the euclidian path or it goes through the nodes (corners) of the obstacles. The algorighm is working as follows:
 1. For each (convex) node, calculate its *visibility polygon* (the area which is visible from that point).
-2. Intersect all visibility polygons recursively to create a *plannar subdivision* of polygons and a map between polygon to the nodes it sees. 
+2. Intersect all visibility polygons recursively to create a *plannar subdivision* of polygons and a map between polygon and the nodes it sees. 
 3. create a *visibility graph* between all nodes.
 Distance calculation between two given points (which are not in line of sight) is done by finding the visible nodes of each point, add each point with its visible nodes to the visibility graph, and run *dijkstra* to find the shortest path.
